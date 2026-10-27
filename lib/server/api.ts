@@ -1,18 +1,18 @@
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { CITIES, detectImage, quoteBooking, validateBooking, validateListing } from "@/lib/marketplace";
-import { admin, ApiError, body, bookingFromRow, database, getBooking, getListing, isAdmin, json, limitedBody, listingFromRow, paymentMode, publicListings, rateLimit, requirePayments, runtime, sameOrigin, user, validate, validId, type DbRow } from "./core";
+import { admin, ApiError, body, bookingsEnabled, bookingFromRow, database, getBooking, getListing, isAdmin, json, limitedBody, listingFromRow, publicListings, rateLimit, requirePayments, runtime, sameOrigin, user, validate, validId, type DbRow } from "./core";
 import { razorpay, requestRefund, settlePayment } from "./payments";
 import { verifyHmac } from "./signatures";
 import { CREATE_BOOKING_SQL, RECONCILE_FULL_REFUND_SQL } from "./booking-sql";
 
-export async function bootstrap(){const who=await getChatGPTUser();return json({user:who?{id:who.userId,name:who.displayName,email:who.email}:null,isAdmin:isAdmin(who),paymentMode:paymentMode(),cities:CITIES,listings:await publicListings()});}
+export async function bootstrap(){const who=await getChatGPTUser();return json({user:who?{id:who.userId,name:who.displayName,email:who.email}:null,isAdmin:isAdmin(who),bookingsEnabled:bookingsEnabled(),cities:CITIES,listings:await publicListings()});}
 export async function listingsGet(){return json({listings:await publicListings()});}
 export async function accountGet(){
  const who=await user(),db=database();
  const [booked,owned,hosted]=await Promise.all([
-  db.prepare("SELECT * FROM bookings WHERE user_id = ? ORDER BY created_at DESC LIMIT 100").bind(who.userId).all<DbRow>(),
+  db.prepare("SELECT * FROM bookings WHERE user_id = ? AND payment_mode = 'live' ORDER BY created_at DESC LIMIT 100").bind(who.userId).all<DbRow>(),
   db.prepare("SELECT * FROM listings WHERE host_id = ? ORDER BY created_at DESC LIMIT 100").bind(who.userId).all<DbRow>(),
-  db.prepare("SELECT * FROM bookings WHERE host_id = ? AND status IN ('confirmed','refund_pending','refunded') ORDER BY created_at DESC LIMIT 100").bind(who.userId).all<DbRow>(),
+  db.prepare("SELECT * FROM bookings WHERE host_id = ? AND payment_mode = 'live' AND status IN ('confirmed','refund_pending','refunded') ORDER BY created_at DESC LIMIT 100").bind(who.userId).all<DbRow>(),
  ]);
  return json({bookings:booked.results.map(bookingFromRow),listings:owned.results.map(r=>listingFromRow(r,true)),hostBookings:hosted.results.map(bookingFromRow)});
 }
@@ -24,7 +24,7 @@ export async function listingsPost(request:Request){
  if(!photo)throw new ApiError(400,"Upload your own parking-space photo before submitting.");
  const id=crypto.randomUUID(),now=new Date().toISOString();
  await database().prepare(`INSERT INTO listings (id,host_id,title,city,area,address,description,vehicle_types,price_per_hour,wash_price,capacity,amenities,image_url,lat,lng,status,rights_confirmed_at,created_at,updated_at,opening_time,closing_time,blocked_dates) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,?,?)`).bind(id,who.userId,listing.title,listing.city,listing.area,listing.address,listing.description,JSON.stringify(listing.vehicleTypes),listing.pricePerHour,listing.washPrice,listing.capacity,JSON.stringify(listing.amenities),listing.imageUrl,listing.lat,listing.lng,now,now,now,listing.openingTime,listing.closingTime,JSON.stringify(listing.blockedDates)).run();
- return json({listing:{...listing,id,hostId:who.userId,status:"pending",demo:false}},201);
+ return json({listing:{...listing,id,hostId:who.userId,status:"pending"}},201);
 }
 export async function listingPatch(request:Request,id:string){
  sameOrigin(request);validId(id);const who=await user();await rateLimit(who.userId,"listings",10);const input=await body(request);
@@ -39,18 +39,18 @@ export async function bookingsPost(request:Request){
  if(!listing||listing.status!=="active")throw new ApiError(404,"This parking space is not available.");
  if(listing.hostId===who.userId)throw new ApiError(400,"You cannot book your own parking space.");
  const booking=validate(()=>validateBooking(input,listing));const amounts=quoteBooking(listing,booking.startAt,booking.endAt,booking.addWash);
- const mode=paymentMode();if(!listing.demo)requirePayments();
+ if(!bookingsEnabled())throw new ApiError(503,"Bookings are not open yet. Payment setup is still in progress.");
+ const {mode}=requirePayments();
  const db=database(),now=new Date().toISOString(),id=crypto.randomUUID(),expiresAt=new Date(Date.now()+10*60000).toISOString();
- const previous=await db.prepare("SELECT * FROM bookings WHERE user_id = ? AND listing_id = ? AND start_at = ? AND end_at = ? AND vehicle_number = ? AND (status IN ('demo','confirmed') OR (status = 'pending_payment' AND expires_at > ?)) LIMIT 1").bind(who.userId,listing.id,booking.startAt,booking.endAt,booking.vehicleNumber,now).first<DbRow>();
+ const previous=await db.prepare("SELECT * FROM bookings WHERE user_id = ? AND listing_id = ? AND start_at = ? AND end_at = ? AND vehicle_number = ? AND payment_mode = 'live' AND (status = 'confirmed' OR (status = 'pending_payment' AND expires_at > ?)) LIMIT 1").bind(who.userId,listing.id,booking.startAt,booking.endAt,booking.vehicleNumber,now).first<DbRow>();
  if(previous){
   if(previous.vehicle_type!==booking.vehicleType||Boolean(previous.add_wash)!==booking.addWash)throw new ApiError(409,"You already have a booking for this vehicle and time with different options. Cancel it in My bookings before changing the vehicle type or car wash.");
   return checkoutResponse(previous);
  }
- const status=listing.demo?"demo":"pending_payment";
- const values=[id,who.userId,listing.hostId,listing.id,JSON.stringify({title:listing.title,city:listing.city,area:listing.area,imageUrl:listing.imageUrl,address:listing.address}),booking.startAt,booking.endAt,booking.vehicleType,booking.vehicleNumber,booking.addWash?1:0,amounts.parkingAmount,amounts.washAmount,amounts.feeAmount,amounts.totalAmount,status,listing.demo?"demo":mode,now,listing.demo?null:expiresAt,String(crypto.getRandomValues(new Uint32Array(1))[0]%900000+100000)];
- const result=await db.prepare(CREATE_BOOKING_SQL).bind(listing.id,booking.startAt,booking.endAt,now,listing.capacity,listing.demo?1:0,who.userId,booking.vehicleNumber,...values).first();
+ const status="pending_payment";
+ const values=[id,who.userId,listing.hostId,listing.id,JSON.stringify({title:listing.title,city:listing.city,area:listing.area,imageUrl:listing.imageUrl,address:listing.address}),booking.startAt,booking.endAt,booking.vehicleType,booking.vehicleNumber,booking.addWash?1:0,amounts.parkingAmount,amounts.washAmount,amounts.feeAmount,amounts.totalAmount,status,mode,now,expiresAt,String(crypto.getRandomValues(new Uint32Array(1))[0]%900000+100000)];
+ const result=await db.prepare(CREATE_BOOKING_SQL).bind(listing.id,booking.startAt,booking.endAt,now,listing.capacity,who.userId,booking.vehicleNumber,...values).first();
  if(!result)throw new ApiError(409,"This space is no longer available for that time, or you already have this booking. Check My bookings or choose another time.");
- if(listing.demo)return json({booking:bookingFromRow((await getBooking(id))!)},201);
  try{
   const order=await razorpay("/orders",{method:"POST",body:{amount:amounts.totalAmount,currency:"INR",receipt:id,notes:{booking_id:id}}});
   if(typeof order.id!=="string"||order.amount!==amounts.totalAmount||order.currency!=="INR")throw new ApiError(502,"The payment provider returned an unexpected order. No booking was confirmed.");
@@ -68,7 +68,7 @@ export async function bookingCancel(request:Request,id:string){
  sameOrigin(request);validId(id);const who=await user();await rateLimit(who.userId,"cancel",15);const row=await getBooking(id);
  if(!row||row.user_id!==who.userId)throw new ApiError(404,"Booking not found.");
  if(["cancelled","refunded","refund_pending","expired"].includes(row.status))return json({booking:bookingFromRow(row)});
- if(row.status==="confirmed"&&Date.parse(row.start_at)<=Date.now())throw new ApiError(409,"This parking session has started. Contact ParkSaathi support for help.");
+ if(row.status==="confirmed"&&Date.parse(row.start_at)<=Date.now())throw new ApiError(409,"This parking session has started. Contact ParkSarthi support for help.");
  const next=row.status==="confirmed"?"refund_pending":"cancelled";
  if(next==="refund_pending"&&requirePayments().mode!==row.payment_mode)throw new ApiError(409,"Payment settings changed. This refund needs administrator review.");
  const changed=await database().prepare("UPDATE bookings SET status = ? WHERE id = ? AND user_id = ? AND status = ? RETURNING id").bind(next,id,who.userId,row.status).first();
@@ -105,14 +105,14 @@ export async function photosGet(key:string){
  const who=await getChatGPTUser();
  const active=await database().prepare("SELECT id FROM listings WHERE image_url = ? AND status = 'active' LIMIT 1").bind(`/api/photos/${key}`).first();
  let permitted=Boolean(active||who?.userId===photo.owner_id||isAdmin(who));
- if(!permitted&&who){permitted=Boolean(await database().prepare("SELECT b.id FROM bookings b JOIN listings l ON l.id = b.listing_id WHERE b.user_id = ? AND b.status = 'confirmed' AND l.image_url = ? LIMIT 1").bind(who.userId,`/api/photos/${key}`).first());}
+ if(!permitted&&who){permitted=Boolean(await database().prepare("SELECT b.id FROM bookings b JOIN listings l ON l.id = b.listing_id WHERE b.user_id = ? AND b.payment_mode = 'live' AND b.status = 'confirmed' AND l.image_url = ? LIMIT 1").bind(who.userId,`/api/photos/${key}`).first());}
  if(!permitted)throw new ApiError(404,"Photo not found.");
  const stored=await runtime().BUCKET?.get(key);if(!stored)throw new ApiError(404,"Photo not found.");
  return new Response(stored.body,{headers:{"Content-Type":photo.mime,"X-Content-Type-Options":"nosniff","Content-Disposition":"inline","Cache-Control":"private, max-age=300","Content-Security-Policy":"default-src 'none'; sandbox"}});
 }
 
 export async function adminGet(){
- await admin();const [spaces,booked]=await Promise.all([database().prepare("SELECT * FROM listings ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 200").all<DbRow>(),database().prepare("SELECT * FROM bookings WHERE payment_mode != 'demo' ORDER BY created_at DESC LIMIT 200").all<DbRow>()]);
+ await admin();const [spaces,booked]=await Promise.all([database().prepare("SELECT * FROM listings ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 200").all<DbRow>(),database().prepare("SELECT * FROM bookings WHERE payment_mode = 'live' ORDER BY created_at DESC LIMIT 200").all<DbRow>()]);
  return json({listings:spaces.results.map(r=>listingFromRow(r,true)),bookings:booked.results.map(bookingFromRow)});
 }
 export async function adminListingPatch(request:Request,id:string){
@@ -138,7 +138,7 @@ export async function paymentsWebhook(request:Request){
  }else if(["refund.processed","refund.failed"].includes(event.event)){
   const refund=event.payload?.refund?.entity;
   if(!refund||typeof refund.id!=="string"||!/^rfnd_[A-Za-z0-9]+$/.test(refund.id)||typeof refund.payment_id!=="string"||!/^pay_[A-Za-z0-9]+$/.test(refund.payment_id))throw new ApiError(400,"Invalid refund event.");
-  const booking=await database().prepare("SELECT * FROM bookings WHERE payment_id = ? AND payment_mode != 'demo'").bind(refund.payment_id).first<DbRow>();
+  const booking=await database().prepare("SELECT * FROM bookings WHERE payment_id = ? AND payment_mode = 'live'").bind(refund.payment_id).first<DbRow>();
   if(booking&&booking.payment_mode===config.mode){
    const verified=await razorpay(`/payments/${encodeURIComponent(refund.payment_id)}/refunds/${encodeURIComponent(refund.id)}`);
    if(verified.payment_id===booking.payment_id&&verified.amount===booking.total_amount){

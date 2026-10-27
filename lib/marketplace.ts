@@ -1,23 +1,11 @@
 export const CITIES = ["Delhi", "Mumbai", "Bengaluru", "Hyderabad", "Pune", "Chennai", "Gurugram", "Noida"] as const;
 export const AMENITIES = ["Covered", "CCTV", "Gated", "24/7 access", "EV charging", "Security guard"] as const;
 export type VehicleType = "car" | "bike" | "suv";
-export type PaymentMode = "demo" | "test" | "live";
-export type Listing = { id:string; hostId:string; title:string; city:string; area:string; address:string; description:string; vehicleTypes:VehicleType[]; pricePerHour:number; washPrice:number|null; capacity:number; amenities:string[]; imageUrl:string; lat:number; lng:number; status:"draft"|"pending"|"active"|"rejected"; demo:boolean; openingTime:string; closingTime:string; blockedDates:string[] };
-export type Booking = { id:string; listingId:string; listingTitle:string; city:string; area:string; imageUrl:string; startAt:string; endAt:string; vehicleType:VehicleType; vehicleNumber:string; addWash:boolean; parkingAmount:number; washAmount:number; feeAmount:number; totalAmount:number; status:"demo"|"pending_payment"|"confirmed"|"cancelled"|"refund_pending"|"refunded"|"expired"; createdAt:string; checkInCode?:string; address?:string; paymentMode?:PaymentMode };
+import type { PaymentMode } from "./payment-config";
+export type { PaymentMode } from "./payment-config";
+export type Listing = { id:string; hostId:string; title:string; city:string; area:string; address:string; description:string; vehicleTypes:VehicleType[]; pricePerHour:number; washPrice:number|null; capacity:number; amenities:string[]; imageUrl:string; lat:number; lng:number; status:"draft"|"pending"|"active"|"rejected"; openingTime:string; closingTime:string; blockedDates:string[] };
+export type Booking = { id:string; listingId:string; listingTitle:string; city:string; area:string; imageUrl:string; startAt:string; endAt:string; vehicleType:VehicleType; vehicleNumber:string; addWash:boolean; parkingAmount:number; washAmount:number; feeAmount:number; totalAmount:number; status:"pending_payment"|"confirmed"|"cancelled"|"refund_pending"|"refunded"|"expired"; createdAt:string; checkInCode?:string; address?:string; paymentMode?:PaymentMode };
 export type BookingInput = { listingId:string; startAt:string; endAt:string; vehicleType:VehicleType; vehicleNumber:string; addWash:boolean };
-const photo=(id:string)=>`https://images.unsplash.com/${id}?auto=format&fit=crop&w=1000&q=85`;
-const demo=(id:string,title:string,city:string,area:string,price:number,lat:number,lng:number,options:Partial<Listing>={}):Listing=>({id,hostId:"demo-host",title,city,area,address:`${area}, ${city} (sample location)`,description:"An example neighbourhood parking space to explore the ParkSaathi experience. This is a sample listing, not a real property or a live reservation.",vehicleTypes:["car","bike","suv"],pricePerHour:price,washPrice:null,capacity:4,amenities:["Covered","Gated","CCTV"],imageUrl:photo("photo-1506521781263-d8422e82f27a"),lat,lng,status:"active",demo:true,openingTime:"00:00",closingTime:"00:00",blockedDates:[],...options});
-export const DEMO_LISTINGS:Listing[]=[
- demo("demo-delhi-1","A quiet spot in the heart of Delhi","Delhi","Connaught Place",5000,28.6315,77.2167,{washPrice:24900,amenities:["Covered","CCTV","Security guard"]}),
- demo("demo-delhi-2","Your neighbourhood driveway","Delhi","Greater Kailash",3500,28.5494,77.2347,{amenities:["Gated","24/7 access"],imageUrl:photo("photo-1590674899484-d5640e854abe"),capacity:2}),
- demo("demo-mumbai-1","Covered parking, Bandra West","Mumbai","Bandra West",7000,19.0596,72.8295,{washPrice:29900,amenities:["Covered","CCTV","EV charging"]}),
- demo("demo-bengaluru-1","An easy stop in Indiranagar","Bengaluru","Indiranagar",4000,12.9784,77.6408,{washPrice:19900,amenities:["Gated","CCTV","24/7 access"],imageUrl:photo("photo-1590674899484-d5640e854abe")}),
- demo("demo-hyderabad-1","Room for your ride in Gachibowli","Hyderabad","Gachibowli",3000,17.4401,78.3489,{amenities:["Covered","Security guard"]}),
- demo("demo-pune-1","A convenient Koregaon Park stop","Pune","Koregaon Park",3500,18.5362,73.894,{washPrice:19900,amenities:["Gated","CCTV"]}),
- demo("demo-chennai-1","Park a little closer, T. Nagar","Chennai","T. Nagar",3000,13.0418,80.2341,{vehicleTypes:["car","bike"],amenities:["Covered","Gated"]}),
- demo("demo-gurugram-1","A covered space near Cyber City","Gurugram","DLF Phase 2",4500,28.4927,77.0896,{washPrice:24900,amenities:["Covered","CCTV","EV charging"]}),
- demo("demo-noida-1","Sector 18 parking & a fresh wash","Noida","Sector 18",4000,28.5708,77.326,{washPrice:19900,amenities:["Covered","CCTV","Security guard"]}),
-];
 export function quoteBooking(listing:Pick<Listing,"pricePerHour"|"washPrice">,startAt:string,endAt:string,addWash:boolean){
  const milliseconds=Date.parse(endAt)-Date.parse(startAt);
  if(!Number.isFinite(milliseconds)||milliseconds<15*60000||milliseconds>7*24*3600000)throw new Error("Choose a parking duration between 15 minutes and 7 days.");
@@ -41,7 +29,7 @@ export function validateBooking(input:unknown,listing:Listing,now=Date.now()):Bo
  validateBookingAvailability(listing,start,end);
  return{listingId:listing.id,startAt:new Date(start).toISOString(),endAt:new Date(end).toISOString(),vehicleType:v.vehicleType as VehicleType,vehicleNumber,addWash:v.addWash};
 }
-export function validateListing(input:unknown):Omit<Listing,"id"|"hostId"|"status"|"demo">{
+export function validateListing(input:unknown):Omit<Listing,"id"|"hostId"|"status">{
  if(!input||typeof input!=="object")throw new Error("Enter the space details.");const v=input as Record<string,unknown>;
  const str=(key:string,min:number,max:number)=>{const t=typeof v[key]==="string"?v[key].trim():"";if(t.length<min||t.length>max||/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(t))throw new Error(`Enter a valid ${key} (${min}–${max} characters).`);return t;};
  const city=str("city",2,40);if(!(CITIES as readonly string[]).includes(city))throw new Error("Choose one of the supported cities.");

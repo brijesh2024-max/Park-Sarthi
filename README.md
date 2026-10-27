@@ -1,6 +1,6 @@
-# ParkSaathi
+# ParkSarthi
 
-A parking marketplace pilot for Indian cities. Hosts offer spare parking space and optional vehicle washing; drivers search, review a quote, and book. The first deployment is private and uses demo inventory and simulated bookings. It does not take real money or pay hosts by default.
+A parking marketplace pilot for Indian cities. Hosts offer spare parking space and optional vehicle washing; drivers search, review a quote, and book. The deployment is private and shows only approved host listings. There is no sample catalogue or simulated checkout. Customer booking stays disabled until live payments are configured; automatic host payouts are not implemented.
 
 ## Stack
 
@@ -10,7 +10,7 @@ React and TypeScript on Vinext, Cloudflare Workers, D1 with Drizzle schema/migra
 
 - Multi-city discovery, vehicle and amenity filters, car-wash add-ons, and transparent INR quotes.
 - Persistent driver bookings, a host listing dashboard, image uploads, and admin listing review.
-- Server-side prices and authorization, booking capacity checks, payment holds, and explicit demo/test/live modes.
+- Server-side prices and authorization, booking capacity checks, payment holds, and a live-payment readiness gate.
 - Payment integration scaffolding needs merchant activation, credentials, and end-to-end provider testing before real use.
 - Hosts set daily opening hours and blocked dates at listing creation; schedule editing and weekly recurring calendars are not included yet.
 - Automatic host payouts, linked-account onboarding, SMS/phone OTP, and staffed customer support are not included.
@@ -49,7 +49,7 @@ The checked-in [.env.example](./.env.example) contains names and safe defaults o
 
 | Variable | Purpose |
 | --- | --- |
-| `PAYMENT_MODE` | `demo` by default; `test` and `live` require matching Razorpay credentials. |
+| `PAYMENT_MODE` | `disabled` by default. Customer reservations require `live`, matching keys, and the live interlock. `test` never enables customer bookings. |
 | `LIVE_PAYMENTS_ENABLED` | Additional explicit live-mode interlock; leave `false` for the pilot. |
 | `ADMIN_USER_IDS` | Comma-separated stable Site user IDs allowed to review listings. Empty means no app admins. |
 | `RAZORPAY_KEY_ID` | Public Checkout key ID from the matching provider environment. |
@@ -77,13 +77,13 @@ Run the backend unit, signature, scheduling, and concurrent database tests:
 node --test tests/backend.test.mjs
 ```
 
-With the migrated local development server running in demo mode and without an admin allowlist:
+With the migrated local development server running with bookings disabled and without an admin allowlist:
 
 ```sh
 node tests/runtime-smoke.mjs
 ```
 
-The smoke test writes a disposable booking, photo and draft listing to the loopback database and cancels the booking. It checks authentication, cross-origin write rejection, validation, authoritative pricing, persistence, cancellation, admin restrictions, forged payment rejection, image upload, photo privacy, and listing review/pause behavior. It refuses non-loopback targets. To select a different local port, set `SMOKE_ORIGIN` to that local origin before running it.
+The smoke test writes a disposable photo and draft listing to the loopback database. It checks authentication, absence of sample inventory and simulation history, rejected sample-booking requests, cross-origin write rejection, admin restrictions, forged payment rejection, image upload, photo privacy, and listing review/pause behavior. Unit/database tests cover pricing and payment/capacity transitions. It refuses non-loopback targets. To select a different local port, set `SMOKE_ORIGIN` to that local origin before running it.
 
 Compile the production artifact with `npm run build`. These checks do not exercise a real Razorpay transaction, bank refund, external webhook delivery, host settlement, or physical parking access. Follow the launch guide for those tests.
 
@@ -94,7 +94,7 @@ Compile the production artifact with `npm run build`. These checks do not exerci
 | `app/marketplace.tsx`, `app/globals.css` | Marketplace UI and responsive styling. |
 | `app/api/` | Account, listing, booking, upload, admin, and payment endpoints. |
 | `app/chatgpt-auth.ts` | Hosted identity helpers. |
-| `lib/marketplace.ts` | Shared types, sample listings, validation, and pricing. |
+| `lib/marketplace.ts` | Shared types, validation, and pricing. Test-only fixtures live under `tests/`. |
 | `lib/server/` | Database, authorization, and provider operations. |
 | `db/`, `drizzle/` | Schema declarations and versioned SQL migrations. |
 | `tests/` | Local verification scripts. |
@@ -103,4 +103,4 @@ Compile the production artifact with `npm run build`. These checks do not exerci
 
 ## Deployment
 
-Use the Sites publishing workflow for the existing project ID in `.openai/hosting.json`; do not create a second Site for an update. It synchronizes source, builds/packages the Worker, applies migrations, and deploys a saved version. Keep the private audience and demo mode until the owner approves the later public launch and the launch guide's requirements are complete.
+Use the Sites publishing workflow for the existing project ID in `.openai/hosting.json`; do not create a second Site for an update. It synchronizes source, builds/packages the Worker, applies migrations, and deploys a saved version. Keep the private audience and disabled bookings until the owner approves the later public launch and the launch guide's requirements are complete.

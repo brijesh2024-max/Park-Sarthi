@@ -5,17 +5,19 @@ import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { CITIES, DEMO_LISTINGS, quoteBooking, validateBooking, validateListing, validateAvailability, validateBookingAvailability, detectImage } from '../lib/marketplace.ts';
+import { quoteBooking, validateBooking, validateListing, validateAvailability, validateBookingAvailability, detectImage } from '../lib/marketplace.ts';
+import { TEST_LISTING } from './fixtures.mjs';
+import { configuredPaymentMode, liveBookingsEnabled } from '../lib/payment-config.ts';
 import { CREATE_BOOKING_SQL, CONFIRM_BOOKING_SQL, RECONCILE_FULL_REFUND_SQL } from '../lib/server/booking-sql.ts';
 import { verifyHmac } from '../lib/server/signatures.ts';
 
 const NOW='2030-01-01T00:00:00.000Z';
 const at=hour=>`2030-01-02T${String(hour).padStart(2,'0')}:00:00.000Z`;
 const expiry='2030-01-01T00:10:00.000Z';
-function insert(db,{id=crypto.randomUUID(),user=id,start=9,end=11,capacity=1,status='pending_payment',expires=expiry,demo=false}={}){
+function insert(db,{id=crypto.randomUUID(),user=id,start=9,end=11,capacity=1,status='pending_payment',expires=expiry}={}){
  const startAt=at(start),endAt=at(end),plate='DL01AB1234';
- return db.prepare(CREATE_BOOKING_SQL).get('space-1',startAt,endAt,NOW,capacity,demo?1:0,user,plate,
-  id,user,'host-1','space-1',JSON.stringify({title:'Parking',city:'Delhi',area:'Central',imageUrl:'',address:'Private address'}),startAt,endAt,'car',plate,0,10000,0,1000,11000,status,demo?'demo':'test',NOW,expires,'123456');
+ return db.prepare(CREATE_BOOKING_SQL).get('space-1',startAt,endAt,NOW,capacity,user,plate,
+  id,user,'host-1','space-1',JSON.stringify({title:'Parking',city:'Delhi',area:'Central',imageUrl:'',address:'Private address'}),startAt,endAt,'car',plate,0,10000,0,1000,11000,status,'live',NOW,expires,'123456');
 }
 function setup(path=':memory:',capacity=1){
  const db=new DatabaseSync(path);db.exec('PRAGMA busy_timeout=10000;');
@@ -28,13 +30,23 @@ if(!isMainThread){
  const db=new DatabaseSync(workerData.path);db.exec('PRAGMA busy_timeout=10000;');
  try{parentPort.postMessage(Boolean(insert(db,{id:workerData.id,capacity:2})));}finally{db.close();}
 }else{
+ test('customer bookings stay disabled without a complete explicitly enabled live configuration',()=>{
+  const live={PAYMENT_MODE:'live',LIVE_PAYMENTS_ENABLED:'true',RAZORPAY_KEY_ID:'rzp_live_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook'};
+  assert.equal(liveBookingsEnabled(live),true);
+  assert.equal(configuredPaymentMode({}), 'disabled');
+  for(const mode of [undefined,'demo','disabled','test','unknown'])assert.equal(liveBookingsEnabled({...live,PAYMENT_MODE:mode}),false);
+  for(const name of Object.keys(live))assert.equal(liveBookingsEnabled({...live,[name]:''}),false,`Missing ${name}`);
+  assert.equal(liveBookingsEnabled({...live,LIVE_PAYMENTS_ENABLED:'false'}),false);
+  assert.equal(liveBookingsEnabled({...live,RAZORPAY_KEY_ID:'rzp_test_fixture'}),false);
+  assert.equal(liveBookingsEnabled({...live,RAZORPAY_KEY_SECRET:'  '}),false);
+ });
  test('prices use integer paise, rounded started hours, optional wash and transparent fee',()=>{
   assert.deepEqual(quoteBooking({pricePerHour:5000,washPrice:19900},at(9),at(11),true),{hours:2,parkingAmount:10000,washAmount:19900,feeAmount:2990,totalAmount:32890});
   assert.equal(quoteBooking({pricePerHour:5000,washPrice:null},at(9),'2030-01-02T10:01:00.000Z',false).parkingAmount,10000);
   assert.throws(()=>quoteBooking({pricePerHour:5000,washPrice:null},at(9),at(10),true),/not offered/);
  });
  test('booking validation rejects past/too long/unsupported/tampered options',()=>{
-  const listing=DEMO_LISTINGS[0],valid={listingId:listing.id,startAt:at(9),endAt:at(11),vehicleType:'car',vehicleNumber:'dl 01 ab 1234',addWash:true};
+  const listing=TEST_LISTING,valid={listingId:listing.id,startAt:at(9),endAt:at(11),vehicleType:'car',vehicleNumber:'dl 01 ab 1234',addWash:true};
   assert.equal(validateBooking(valid,listing,Date.parse(NOW)).vehicleNumber,'DL01AB1234');
   assert.throws(()=>validateBooking({...valid,startAt:'2020-01-01'},listing,Date.parse(NOW)),/future/);
   assert.throws(()=>validateBooking({...valid,endAt:'2030-02-01'},listing,Date.parse(NOW)),/7 days/);
@@ -43,12 +55,11 @@ if(!isMainThread){
   assert.throws(()=>validateBooking({...valid,addWash:'true'},listing,Date.parse(NOW)),/whether/);
  });
  test('host validation requires permissions, bounded prices and a local uploaded photo',()=>{
-  const input={...DEMO_LISTINGS[0],rightsConfirmed:true,imageUrl:'/api/photos/abcd-1234.jpg'};
+  const input={...TEST_LISTING,rightsConfirmed:true,imageUrl:'/api/photos/abcd-1234.jpg'};
   assert.equal(validateListing(input).city,'Delhi');
   assert.throws(()=>validateListing({...input,rightsConfirmed:false}),/permission/);
   assert.throws(()=>validateListing({...input,pricePerHour:-1}),/Hourly/);
   assert.throws(()=>validateListing({...input,imageUrl:'https://attacker.example/photo.svg'}),/Upload/);
-  assert.equal(new Set(DEMO_LISTINGS.map(l=>l.city)).size,CITIES.length);
  });
  test('uploads reject disguised HTML and SVG; only raster signatures are accepted',()=>{
   assert.equal(detectImage(new TextEncoder().encode('<svg><script>alert(1)</script></svg>')),null);
@@ -100,6 +111,26 @@ if(!isMainThread){
    assert.equal(insert(db,{id:'c',start:9,end:11}),undefined);
   }finally{db.close();}
  });
+ test('an unapproved or missing listing cannot be reserved',()=>{
+  const db=setup();try{
+   for(const status of ['pending','draft','rejected']){
+    db.prepare('UPDATE listings SET status=?').run(status);
+    assert.equal(insert(db),undefined);
+   }
+   db.prepare('DELETE FROM listings').run();
+   assert.equal(insert(db),undefined);
+  }finally{db.close();}
+ });
+ test('legacy test payments neither consume real capacity nor become confirmed reservations',()=>{
+  const db=setup();try{
+   assert.ok(insert(db,{id:'legacy'}));
+   db.prepare("UPDATE bookings SET payment_mode='test' WHERE id='legacy'").run();
+   assert.ok(insert(db,{id:'real'}));
+   assert.equal(db.prepare(CONFIRM_BOOKING_SQL).get('legacy',NOW,'pay_legacy',NOW),undefined);
+   assert.equal(db.prepare(RECONCILE_FULL_REFUND_SQL).run('rfnd_legacy','legacy').changes,0);
+   assert.ok(db.prepare(CONFIRM_BOOKING_SQL).get('real',NOW,'pay_real',NOW));
+  }finally{db.close();}
+ });
  test('expired holds release capacity and late capture cannot displace new booking',()=>{
   const db=setup();try{
    assert.ok(insert(db,{id:'old',expires:'2029-12-31T23:59:00.000Z'}));
@@ -134,7 +165,7 @@ if(!isMainThread){
   }finally{db.close();}
  });
  test('concurrent SQLite writers cannot overbook the shared capacity',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'parksaathi-sql-')),path=join(dir,'bookings.sqlite');
+  const dir=mkdtempSync(join(tmpdir(),'parksarthi-sql-')),path=join(dir,'bookings.sqlite');
   const db=setup(path,2);db.exec('PRAGMA journal_mode=WAL');db.close();
   try{
    const outcomes=await Promise.all(Array.from({length:8},(_,i)=>new Promise((resolve,reject)=>{
@@ -145,7 +176,7 @@ if(!isMainThread){
    const check=new DatabaseSync(path);assert.equal(check.prepare('SELECT count(*) AS n FROM bookings').get().n,2);check.close();
   }finally{
    const target=resolve(dir),root=resolve(tmpdir())+sep;
-   assert.ok(target.startsWith(root)&&target.split(sep).at(-1).startsWith('parksaathi-sql-'));
+   assert.ok(target.startsWith(root)&&target.split(sep).at(-1).startsWith('parksarthi-sql-'));
    rmSync(target,{recursive:true,force:true});
   }
  });

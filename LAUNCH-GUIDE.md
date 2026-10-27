@@ -1,6 +1,6 @@
-# ParkSaathi: from private pilot to real bookings
+# ParkSarthi: from private pilot to real bookings
 
-Prepared 26 October 2026. This release is a private pilot with ChatGPT sign-in and clearly labelled sample spaces. `PAYMENT_MODE=demo` is the default. Demo bookings are simulations: they do not reserve property, charge drivers, or pay hosts. Keep it this way until the checks below pass.
+Updated 27 October 2026. This release uses ChatGPT sign-in and approved host listings only. Search is empty until hosts submit real spaces and an administrator approves them. `PAYMENT_MODE=disabled` is the default; no simulated bookings can be created. Legacy demo/test bookings are retained in storage but excluded from customer and host dashboards. Keep bookings disabled until the checks below pass.
 
 ## What this release covers
 
@@ -18,7 +18,7 @@ The app provides multi-city discovery, car/bike/SUV filters, optional washing, b
 
 ## Your first setup steps
 
-1. Test the private app with sample spaces. Change cities, book with and without a wash, cancel a booking, submit a host listing and upload a photo. Reload and sign in again to check persistence.
+1. Check the empty marketplace, submit a space you actually control with your own photograph, and reload to check persistence. Run the automated tests locally; test fixtures must not be uploaded to the live marketplace.
 2. While signed in, open `/api/bootstrap` and find your `user.id`. Configure that exact ID in the hosted `ADMIN_USER_IDS` environment variable, then redeploy. Add further trusted admins only by their own stable IDs. Do not use an email address or a browser-supplied role.
 3. Review a submitted listing as admin. Test that another account cannot see private bookings, edit another host's space, or access unpublished photos. A listing approval records your review; it is not a physical security guarantee.
 4. Choose the business/operator identity, support email and phone, domain, and initial launch neighbourhoods. The software supports multiple cities; start actual operations only where you can verify and support hosts.
@@ -28,7 +28,7 @@ The app provides multi-city discovery, car/bike/SUV filters, optional washing, b
 
 The configuration keys are listed in `.env.example`. Hosted runtime settings are separate from local files and the hosting manifest. A new deployment is required after changing hosted values. Keep `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` server-only; the Checkout key ID is intentionally available to the client.
 
-Use `PAYMENT_MODE=test` with a matching Razorpay test key pair. Create a genuine test listing through the host/admin flow; the sample catalogue remains demonstrative. Confirm automatic capture settings in the provider dashboard. Razorpay requires a server-created order, server-side signature validation using the stored order ID, and payment-status verification. A browser success message alone is insufficient. [Standard Checkout integration](https://razorpay.com/docs/payments/payment-gateway/web-integration/standard/integration-steps/)
+Customer booking is deliberately live-only: setting `PAYMENT_MODE=test` will not open checkout or create reservations. Provider sandbox lifecycle tests need an isolated staging harness/database before live launch; do not add test records or weaken the gate on the customer site. Confirm automatic capture settings in the provider dashboard. Razorpay requires a server-created order, server-side signature validation using the stored order ID, and payment-status verification. A browser success message alone is insufficient. [Standard Checkout integration](https://razorpay.com/docs/payments/payment-gateway/web-integration/standard/integration-steps/)
 
 Configure `/api/payments/webhook` on the deployed origin in the Razorpay test dashboard, with the same distinct webhook secret as the server. Subscribe to `payment.captured`, `order.paid`, `refund.processed`, and `refund.failed`. The endpoint must be reachable by Razorpay: a private Site's sign-in gate can reject the request before the handler runs. Resolve this through an approved public ingress or an explicitly authorised public launch; do not put a Site access token in a URL or weaken access controls just to bypass the gate.
 
@@ -46,7 +46,7 @@ Investigate every mismatch between bookings and the provider dashboard. Use prov
 
 ## Set up host payments separately
 
-Tell the provider exactly how ParkSaathi works: drivers pay for independent hosts' spaces, the platform collects a fee, and hosts receive their share. Ask for written confirmation of the supported marketplace fund flow and your eligibility before accepting money on hosts' behalf.
+Tell the provider exactly how ParkSarthi works: drivers pay for independent hosts' spaces, the platform collects a fee, and hosts receive their share. Ask for written confirmation of the supported marketplace fund flow and your eligibility before accepting money on hosts' behalf.
 
 Razorpay Route supports splitting funds to linked accounts, settlement controls, and transfer reversals, but its current documentation includes eligibility and compliance conditions. Do not assume a new business qualifies or that a standard Payment Gateway account authorises this model. If Route is unavailable, ask the provider for an approved alternative before implementing it. [Route overview and eligibility](https://razorpay.com/docs/payments/route/)
 
@@ -71,4 +71,4 @@ Live payments require both `PAYMENT_MODE=live` and `LIVE_PAYMENTS_ENABLED=true`,
 - Database recovery/export options and photo backups are confirmed for the hosting account, with a tested restore process and retention policy. Source code versioning is not a database backup.
 - Alerts cover application failures, payment/webhook failures, unresolved refunds and settlement discrepancies. Assign an operator to reconcile them daily during the pilot.
 
-Public launch, a custom domain, and live credentials are explicit later steps. Keeping the first pilot private lets you review the full experience without offering sample inventory to real drivers.
+Public launch, a custom domain, and live credentials are explicit later steps. The private site can collect and review genuine host listings while booking remains disabled.
