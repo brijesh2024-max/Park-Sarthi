@@ -72,3 +72,13 @@ Live payments require both `PAYMENT_MODE=live` and `LIVE_PAYMENTS_ENABLED=true`,
 - Alerts cover application failures, payment/webhook failures, unresolved refunds and settlement discrepancies. Assign an operator to reconcile them daily during the pilot.
 
 The Render site can collect registrations and genuine host listings while booking remains disabled. A working public URL is not a completed payments, host-payout or operations launch. A custom domain must be added to both Render and Supabase auth configuration. Treat any old Sites-to-Supabase record migration as a separate checked transfer of data and account ownership.
+
+
+
+
+
+
+
+
+
+

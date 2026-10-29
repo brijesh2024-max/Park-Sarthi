@@ -1,5 +1,7 @@
 # ParkSarthi
 
+The current login UI supports **Google** and **email OTP** (including Gmail). Follow [AUTH-SETUP.md](./AUTH-SETUP.md) to enable the providers and code emails. Existing password-account recovery remains available; the earlier password-signup description below documents the retained compatibility routes.
+
 ParkSarthi connects drivers with hosts offering spare parking space and optional vehicle washing across Indian cities. Search shows approved host listings only. It stays empty until real spaces are submitted and reviewed; there is no sample catalogue or simulated checkout.
 
 ## Stack

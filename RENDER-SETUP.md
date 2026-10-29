@@ -72,6 +72,8 @@ Deploy the service and inspect the logs. `/api/health` returns an unavailable st
 
 ## 6. Configure real signup and recovery email
 
+**For the current Google and email OTP login, follow [AUTH-SETUP.md](./AUTH-SETUP.md) first.** It replaces the password-signup instructions and confirmation templates below. Recovery instructions below apply only to existing password accounts.
+
 In Supabase **Authentication**:
 
 1. Enable email/password signup and keep **Confirm email** enabled.

@@ -17,11 +17,18 @@ export function validPassword(value: unknown): value is string {
   return typeof value === "string" && value.length >= 12 && value.length <= 128;
 }
 
+export function validEmailCode(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9]{6,10}$/.test(value);
+}
+
 export function allowedAuthOrigin(origin: string | null, expectedOrigin: string, fetchSite: string | null): boolean {
   return origin === expectedOrigin && fetchSite !== "cross-site";
 }
 
 export const AUTH_MESSAGES: Record<string, string> = {
+  code: "That code is incorrect or expired. Try again or request a new code.",
+  sent: "Check your inbox and spam folder for your sign-in code. Use the most recent code.",
+  google: "Google sign-in could not start. Please try again or use an email code.",
   unavailable: "Account services are being configured. Please try again later.",
   invalid: "Check your details and try again.",
   credentials: "The email or password is incorrect, or your email has not been confirmed yet.",

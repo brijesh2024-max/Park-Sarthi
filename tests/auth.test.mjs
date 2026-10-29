@@ -27,3 +27,10 @@ test('auth notices only render known safe message codes', () => {
   assert.match(authMessage('confirmation'), /inbox/);
   for (const value of ['constructor', '__proto__', 'toString', '<script>bad</script>', ['invalid'], undefined]) assert.equal(authMessage(value), null);
 });
+
+test('email codes reject malformed input before verification', async () => {
+  const {validEmailCode} = await import('../lib/auth/policy.ts');
+  assert.equal(validEmailCode('012345'), true);
+  assert.equal(validEmailCode('0123456789'), true);
+  for (const value of [null, 123456, '', '12345', '12345678901', '12 3456', '12345x', '123456\n', '<script>']) assert.equal(validEmailCode(value), false);
+});

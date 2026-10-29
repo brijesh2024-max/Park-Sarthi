@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
+  if (params.has("error")) return authError(request,"sign-in","google");
   const code = params.get("code");
   if (!code || code.length > 2048) return authError(request, "sign-in", "expired");
   const client = await createAuthClient();
