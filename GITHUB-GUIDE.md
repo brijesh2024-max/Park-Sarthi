@@ -1,37 +1,30 @@
-# Push ParkSarthi to your GitHub account
+# Push ParkSarthi updates to GitHub
 
-The local project is already a Git repository on branch `main`. No GitHub remote is configured. The website's name is ParkSarthi; the existing folder is still named `parksaathi`.
+Your repository is [brijesh2024-max/Park-Sarthi](https://github.com/brijesh2024-max/Park-Sarthi), and the local `main` branch already has an `origin` remote. The website is named ParkSarthi; the local folder is still `parksaathi`.
 
-1. Sign in to GitHub and create a repository named `parksarthi`. Choose **Private**. Leave the README, licence and .gitignore options unchecked, since the local project already has files.
-2. Open PowerShell and run:
+Open PowerShell and run these commands after reviewing the changes:
 
 ```powershell
 Set-Location 'C:\Users\Brijesh Gaur\OneDrive\Desktop\car parking Project\parksaathi'
 git status
+git diff --stat
 git add .
-git commit -m "Remove sample data and update ParkSarthi branding"
+git commit -m "Prepare ParkSarthi for Render and Supabase"
+git push origin main
 ```
 
-3. Copy the repository's HTTPS URL from GitHub. Replace the example URL below with your actual URL, then run:
+Complete GitHub sign-in if prompted. Refresh the repository and verify that your new commit and the `postgres/`, `render.yaml`, updated `package.json` and authentication files are present. You do not need to create another repository or add `origin` again.
 
-```powershell
-git remote add origin https://github.com/YOUR_USERNAME/parksarthi.git
-git remote -v
-git push -u origin main
-```
+The checked-in `.gitignore` excludes secret env files, local database/photo state, dependency folders, build output and temporary reports. `.env.example` contains safe placeholders and is intentionally included. Do not force-add `.env`, `.env.local`, `.dev.vars`, service keys or database files.
 
-4. Complete GitHub's sign-in if prompted. Refresh the repository page and confirm that `app`, `lib`, `db`, `drizzle`, `tests`, and `package.json` are visible.
-
-The checked-in `.gitignore` excludes local secret files, local database/photo state, build output, dependency folders and temporary reports. `.env.example` contains placeholders and is intentionally included. Do not force-add `.env`, `.dev.vars`, API keys or database files.
-
-If Git reports **dubious ownership**, trust only this project folder, then retry the failed command:
+If Git reports **dubious ownership**, trust only this project folder and retry:
 
 ```powershell
 git config --global --add safe.directory 'C:/Users/Brijesh Gaur/OneDrive/Desktop/car parking Project/parksaathi'
 ```
 
-If `origin` already exists because you repeated the steps, inspect `git remote -v` and skip `git remote add` when it already points to the intended repository. Do not force-push over an existing repository's work.
+If Git rejects the push because the remote contains newer commits, stop and inspect the difference before integrating them. Do not force-push over another person's work.
 
-Pushing to GitHub uploads source code; it does not copy hosted database records or uploaded photos and does not deploy the website. The app still needs the documented server/database/storage/authentication migration before Render deployment. Keep customer booking disabled until real payment and host settlement setup is complete.
+Pushing source does not copy hosted records or uploaded photos. When Render is connected with automatic deploys enabled, a push to its linked branch can start a deployment. Configure Supabase and Render using [RENDER-SETUP.md](./RENDER-SETUP.md) before relying on that deployment.
 
 Official reference: [GitHub: adding locally hosted code](https://docs.github.com/en/migrations/importing-source-code/using-the-command-line-to-import-source-code/adding-locally-hosted-code-to-github).

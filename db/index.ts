@@ -1,13 +1,29 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "./schema";
+import "server-only";
+import { Pool } from "pg";
+import { Database, type DatabaseConnection } from "./adapter";
+import { databaseConnectionConfig } from "./config";
 
-export function getDb() {
-  if (!env.DB) {
-    throw new Error(
-      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
-    );
-  }
+let pool: Pool | undefined;
+let database: Database | undefined;
 
-  return drizzle(env.DB, { schema });
+export function getDatabase(): Database {
+  if (database) return database;
+  pool = new Pool(databaseConnectionConfig(process.env));
+  pool.on("error", () => { console.error("ParkSarthi database connection failed."); });
+  const currentPool = pool;
+  database = new Database({
+    async query(sql, values) {
+      const client = await currentPool.connect();
+      try {
+        await client.query("SET search_path TO parksarthi, public");
+        return await client.query(sql, values);
+      } finally { client.release(); }
+    },
+  }, async () => await currentPool.connect() as DatabaseConnection);
+  return database;
+}
+
+export async function closeDatabase() {
+  const currentPool = pool; pool = undefined; database = undefined;
+  await currentPool?.end();
 }

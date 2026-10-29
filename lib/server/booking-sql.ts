@@ -1,11 +1,17 @@
-// One SQLite statement checks availability and inserts/updates the reservation.
-// D1 serializes writes; a separate read-then-write would permit double booking.
+// Run creation and confirmation inside Database.withListingLock(listingId, ...).
+// The row lock serializes writers across Render instances. Each statement then
+// sees the previous writer's committed reservations in READ COMMITTED isolation.
 // Evaluate occupancy at each interval boundary so consecutive reservations do
 // not incorrectly consume two spaces for the whole requested interval.
 export const CREATE_BOOKING_SQL = `
-WITH candidate AS (
- SELECT ? AS listing_id, ? AS start_at, ? AS end_at, ? AS now,
-        ? AS capacity, ? AS user_id, ? AS vehicle_number
+WITH request AS (
+ SELECT CAST(? AS text) AS listing_id, CAST(? AS text) AS start_at,
+        CAST(? AS text) AS end_at, CAST(? AS text) AS now,
+        CAST(? AS integer) AS quoted_capacity, CAST(? AS text) AS user_id,
+        CAST(? AS text) AS vehicle_number
+), candidate AS (
+ SELECT r.listing_id,r.start_at,r.end_at,r.now,r.user_id,r.vehicle_number,l.capacity
+ FROM request r JOIN listings l ON l.id = r.listing_id AND l.status = 'active'
 ), occupied AS (
  SELECT b.start_at,b.end_at FROM bookings b,candidate c
  WHERE b.payment_mode = 'live' AND b.listing_id = c.listing_id AND b.start_at < c.end_at AND b.end_at > c.start_at

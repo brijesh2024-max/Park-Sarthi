@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: parksarthi
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: APP_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: parking-photos
+      - key: ADMIN_USER_IDS
+        sync: false
+      - key: PAYMENT_MODE
+        value: disabled
+      - key: LIVE_PAYMENTS_ENABLED
+        value: "false"

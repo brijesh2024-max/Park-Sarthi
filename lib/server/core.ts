@@ -1,20 +1,23 @@
-import { env } from "cloudflare:workers";
-import { getChatGPTUser, type ChatGPTUser } from "@/app/chatgpt-auth";
+import "server-only";
+import { getDatabase } from "@/db";
+import { PhotoStorageError } from "./storage";
+import { appOrigin, authReady } from "@/lib/auth/config";
+import { getCurrentUser, type User } from "@/lib/auth/server";
 import { type Booking, type Listing, type PaymentMode } from "@/lib/marketplace";
 
-import { configuredPaymentMode, liveBookingsEnabled } from "../payment-config";
+import { configuredPaymentMode, liveBookingsEnabled, type PaymentEnvironment } from "../payment-config";
 
-export const bookingsEnabled = () => liveBookingsEnabled(runtime());
+export const bookingsEnabled = () => Boolean(process.env.DATABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && authReady() && liveBookingsEnabled(runtime()));
 
 export class ApiError extends Error { constructor(public status:number,message:string){super(message);} }
-export const runtime = () => env as Cloudflare.Env;
-export function database(){const db=runtime().DB;if(!db)throw new ApiError(503,"The database is not available yet. Please try again shortly.");return db;}
+export const runtime = () => process.env as NodeJS.ProcessEnv & PaymentEnvironment;
+export function database(){if(!process.env.DATABASE_URL)throw new ApiError(503,"The marketplace is being configured. Please try again later.");return getDatabase();}
 export function json(data:unknown,status=200){return Response.json(data,{status,headers:{"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});}
-export async function handler(fn:()=>Promise<Response>){try{return await fn();}catch(error){if(error instanceof ApiError)return json({error:error.message},error.status);console.error("ParkSarthi request failed",error instanceof Error?error.message:"Unknown error");return json({error:"Something went wrong. Please try again shortly."},500);}}
-export async function user(){const value=await getChatGPTUser();if(!value)throw new ApiError(401,"Sign in to continue.");return value;}
-export function isAdmin(value:ChatGPTUser|null){return Boolean(value&&runtime().ADMIN_USER_IDS?.split(",").map(s=>s.trim()).filter(Boolean).includes(value.userId));}
+export async function handler(fn:()=>Promise<Response>){try{return await fn();}catch(error){if(error instanceof ApiError||error instanceof PhotoStorageError)return json({error:error.message},error.status);console.error("ParkSarthi request failed",error instanceof Error?error.name:"Unknown error");return json({error:"Something went wrong. Please try again shortly."},500);}}
+export async function user(){const value=await getCurrentUser();if(!value)throw new ApiError(401,"Sign in to continue.");return value;}
+export function isAdmin(value:User|null){return Boolean(value&&runtime().ADMIN_USER_IDS?.split(",").map(s=>s.trim()).filter(Boolean).includes(value.userId));}
 export async function admin(){const value=await user();if(!isAdmin(value))throw new ApiError(403,"This action is only available to a ParkSarthi administrator.");return value;}
-export function sameOrigin(request:Request){const origin=request.headers.get("origin");if(!origin||origin!==new URL(request.url).origin||request.headers.get("sec-fetch-site")==="cross-site")throw new ApiError(403,"This request must come from ParkSarthi.");}
+export function sameOrigin(request:Request){const expected=appOrigin(new URL(request.url).origin);if(!expected)throw new ApiError(503,"The site address is not configured yet.");const origin=request.headers.get("origin");if(!origin||origin!==expected||request.headers.get("sec-fetch-site")==="cross-site")throw new ApiError(403,"This request must come from ParkSarthi.");}
 export async function limitedBody(request:Request,maxBytes:number){
  const length=Number(request.headers.get("content-length")||0);if(length>maxBytes)throw new ApiError(413,"The upload or request is too large.");
  const reader=request.body?.getReader();if(!reader)return new Uint8Array();const chunks:Uint8Array[]=[];let size=0;
@@ -25,7 +28,7 @@ export async function body(request:Request){if(!request.headers.get("content-typ
 export function validate<T>(fn:()=>T):T{try{return fn();}catch(error){throw new ApiError(400,error instanceof Error?error.message:"Check the entered details.");}}
 export async function rateLimit(userId:string,action:string,limit:number,windowSeconds=60){
  const now=Math.floor(Date.now()/1000),start=Math.floor(now/windowSeconds)*windowSeconds;
- const row=await database().prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END, window_start = excluded.window_start RETURNING count").bind(`${userId}:${action}`,start).first<{count:number}>();
+ const row=await database().prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN rate_limits.window_start = excluded.window_start THEN rate_limits.count + 1 ELSE 1 END, window_start = excluded.window_start RETURNING count").bind(`${userId}:${action}`,start).first<{count:number}>();
  if(!row||row.count>limit)throw new ApiError(429,"Too many requests. Please wait a minute and try again.");
 }
 export function paymentMode():PaymentMode{return configuredPaymentMode(runtime());}
@@ -37,7 +40,7 @@ export function requirePayments(){
  return {keyId:e.RAZORPAY_KEY_ID,keySecret:e.RAZORPAY_KEY_SECRET,webhookSecret:e.RAZORPAY_WEBHOOK_SECRET,mode};
 }
 
-// Raw D1 rows use snake_case; conversion is the only place that exposes them to clients.
+// Raw database rows use snake_case; conversion is the only place that exposes them to clients.
 export type DbRow = Record<string, any>;
 export function listingFromRow(r:DbRow,exactAddress=false):Listing{return{id:r.id,hostId:r.host_id,title:r.title,city:r.city,area:r.area,address:exactAddress?r.address:`${r.area}, ${r.city}`,description:r.description,vehicleTypes:JSON.parse(r.vehicle_types),pricePerHour:r.price_per_hour,washPrice:r.wash_price,capacity:r.capacity,amenities:JSON.parse(r.amenities),imageUrl:r.image_url,lat:exactAddress?r.lat:Math.round(r.lat*100)/100,lng:exactAddress?r.lng:Math.round(r.lng*100)/100,status:r.status,openingTime:r.opening_time??"00:00",closingTime:r.closing_time??"00:00",blockedDates:JSON.parse(r.blocked_dates??"[]")};}
 export function bookingFromRow(r:DbRow):Booking{

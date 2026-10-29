@@ -1,11 +1,12 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getCurrentUser } from "@/lib/auth/server";
+import { putPhoto, getPhoto, deletePhoto } from "./storage";
 import { CITIES, detectImage, quoteBooking, validateBooking, validateListing } from "@/lib/marketplace";
-import { admin, ApiError, body, bookingsEnabled, bookingFromRow, database, getBooking, getListing, isAdmin, json, limitedBody, listingFromRow, publicListings, rateLimit, requirePayments, runtime, sameOrigin, user, validate, validId, type DbRow } from "./core";
+import { admin, ApiError, body, bookingsEnabled, bookingFromRow, database, getBooking, getListing, isAdmin, json, limitedBody, listingFromRow, publicListings, rateLimit, requirePayments, sameOrigin, user, validate, validId, type DbRow } from "./core";
 import { razorpay, requestRefund, settlePayment } from "./payments";
 import { verifyHmac } from "./signatures";
 import { CREATE_BOOKING_SQL, RECONCILE_FULL_REFUND_SQL } from "./booking-sql";
 
-export async function bootstrap(){const who=await getChatGPTUser();return json({user:who?{id:who.userId,name:who.displayName,email:who.email}:null,isAdmin:isAdmin(who),bookingsEnabled:bookingsEnabled(),cities:CITIES,listings:await publicListings()});}
+export async function bootstrap(){const who=await getCurrentUser();return json({user:who?{id:who.userId,name:who.displayName,email:who.email}:null,isAdmin:isAdmin(who),bookingsEnabled:bookingsEnabled(),cities:CITIES,listings:await publicListings()});}
 export async function listingsGet(){return json({listings:await publicListings()});}
 export async function accountGet(){
  const who=await user(),db=database();
@@ -49,7 +50,7 @@ export async function bookingsPost(request:Request){
  }
  const status="pending_payment";
  const values=[id,who.userId,listing.hostId,listing.id,JSON.stringify({title:listing.title,city:listing.city,area:listing.area,imageUrl:listing.imageUrl,address:listing.address}),booking.startAt,booking.endAt,booking.vehicleType,booking.vehicleNumber,booking.addWash?1:0,amounts.parkingAmount,amounts.washAmount,amounts.feeAmount,amounts.totalAmount,status,mode,now,expiresAt,String(crypto.getRandomValues(new Uint32Array(1))[0]%900000+100000)];
- const result=await db.prepare(CREATE_BOOKING_SQL).bind(listing.id,booking.startAt,booking.endAt,now,listing.capacity,who.userId,booking.vehicleNumber,...values).first();
+ const result=await db.withListingLock(listing.id,tx=>tx.prepare(CREATE_BOOKING_SQL).bind(listing.id,booking.startAt,booking.endAt,now,listing.capacity,who.userId,booking.vehicleNumber,...values).first());
  if(!result)throw new ApiError(409,"This space is no longer available for that time, or you already have this booking. Check My bookings or choose another time.");
  try{
   const order=await razorpay("/orders",{method:"POST",body:{amount:amounts.totalAmount,currency:"INR",receipt:id,notes:{booking_id:id}}});
@@ -87,7 +88,7 @@ export async function paymentsVerify(request:Request){
 }
 
 export async function uploadsPost(request:Request){
- sameOrigin(request);const who=await user();await rateLimit(who.userId,"uploads",10);const bucket=runtime().BUCKET;if(!bucket)throw new ApiError(503,"Photo storage is not available yet.");
+ sameOrigin(request);const who=await user();await rateLimit(who.userId,"uploads",10);
  if(!request.headers.get("content-type")?.startsWith("multipart/form-data"))throw new ApiError(415,"Upload a JPEG, PNG or WebP photo.");
  const bytes=await limitedBody(request,5*1024*1024+65536);
  let form:FormData;try{form=await new Request(request.url,{method:"POST",headers:{"content-type":request.headers.get("content-type")!},body:bytes}).formData();}catch{throw new ApiError(400,"The photo upload could not be read.");}
@@ -95,19 +96,19 @@ export async function uploadsPost(request:Request){
  const photoBytes=new Uint8Array(await file.arrayBuffer()),kind=detectImage(photoBytes);
  if(!kind||file.type&&file.type!==kind.mime)throw new ApiError(400,"Only genuine JPEG, PNG and WebP photos are accepted.");
  const key=`${crypto.randomUUID()}.${kind.extension}`;
- await bucket.put(key,photoBytes,{httpMetadata:{contentType:kind.mime},customMetadata:{ownerId:who.userId}});
- try{await database().prepare("INSERT INTO photos (key,owner_id,mime,size,created_at) VALUES (?,?,?,?,?)").bind(key,who.userId,kind.mime,file.size,new Date().toISOString()).run();}catch(error){await bucket.delete(key);throw error;}
+ await putPhoto(key,photoBytes,{contentType:kind.mime,ownerId:who.userId});
+ try{await database().prepare("INSERT INTO photos (key,owner_id,mime,size,created_at) VALUES (?,?,?,?,?)").bind(key,who.userId,kind.mime,file.size,new Date().toISOString()).run();}catch(error){await deletePhoto(key).catch(()=>console.error("Photo cleanup requires review"));throw error;}
  return json({url:`/api/photos/${key}`},201);
 }
 export async function photosGet(key:string){
  if(!/^[a-f0-9-]+\.(jpg|png|webp)$/.test(key))throw new ApiError(404,"Photo not found.");
  const photo=await database().prepare("SELECT * FROM photos WHERE key = ?").bind(key).first<DbRow>();if(!photo)throw new ApiError(404,"Photo not found.");
- const who=await getChatGPTUser();
+ const who=await getCurrentUser();
  const active=await database().prepare("SELECT id FROM listings WHERE image_url = ? AND status = 'active' LIMIT 1").bind(`/api/photos/${key}`).first();
  let permitted=Boolean(active||who?.userId===photo.owner_id||isAdmin(who));
  if(!permitted&&who){permitted=Boolean(await database().prepare("SELECT b.id FROM bookings b JOIN listings l ON l.id = b.listing_id WHERE b.user_id = ? AND b.payment_mode = 'live' AND b.status = 'confirmed' AND l.image_url = ? LIMIT 1").bind(who.userId,`/api/photos/${key}`).first());}
  if(!permitted)throw new ApiError(404,"Photo not found.");
- const stored=await runtime().BUCKET?.get(key);if(!stored)throw new ApiError(404,"Photo not found.");
+ const stored=await getPhoto(key);if(!stored)throw new ApiError(404,"Photo not found.");
  return new Response(stored.body,{headers:{"Content-Type":photo.mime,"X-Content-Type-Options":"nosniff","Content-Disposition":"inline","Cache-Control":"private, max-age=300","Content-Security-Policy":"default-src 'none'; sandbox"}});
 }
 
@@ -133,7 +134,7 @@ export async function paymentsWebhook(request:Request){
  if(["payment.captured","order.paid"].includes(event.event)){
   const payment=event.payload?.payment?.entity;
   if(!payment||typeof payment.id!=="string"||!/^pay_[A-Za-z0-9]+$/.test(payment.id)||typeof payment.order_id!=="string")throw new ApiError(400,"Invalid payment event.");
-  const booking=await database().prepare("SELECT * FROM bookings WHERE order_id = ?").bind(payment.order_id).first<DbRow>();
+  const booking=await database().prepare("SELECT * FROM bookings WHERE order_id = ? AND payment_mode = 'live'").bind(payment.order_id).first<DbRow>();
   if(booking&&booking.payment_mode===config.mode)await settlePayment(booking.id,payment.id);
  }else if(["refund.processed","refund.failed"].includes(event.event)){
   const refund=event.payload?.refund?.entity;
@@ -147,6 +148,6 @@ export async function paymentsWebhook(request:Request){
    }
   }
  }
- await database().prepare("INSERT OR IGNORE INTO payment_events (id,event_type,processed_at) VALUES (?,?,?)").bind(eventId,String(event.event||"unknown").slice(0,80),new Date().toISOString()).run();
+ await database().prepare("INSERT INTO payment_events (id,event_type,processed_at) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING").bind(eventId,String(event.event||"unknown").slice(0,80),new Date().toISOString()).run();
  return json({received:true});
 }

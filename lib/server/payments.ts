@@ -38,7 +38,7 @@ export async function settlePayment(bookingId:string,paymentId:string){
  const now=new Date().toISOString();
  // Re-check availability in the same UPDATE that confirms the booking, including
  // payments arriving after a hold expired. Never revive a cancelled booking.
- const confirmed=await database().prepare(CONFIRM_BOOKING_SQL).bind(booking.id,now,paymentId,now).first();
+ const confirmed=await database().withListingLock(booking.listing_id,tx=>tx.prepare(CONFIRM_BOOKING_SQL).bind(booking!.id,now,paymentId,now).first());
  if(!confirmed){
   await database().prepare("UPDATE bookings SET payment_id = ?, status = 'refund_pending' WHERE id = ? AND status IN ('pending_payment','expired','cancelled')").bind(paymentId,booking.id).run();
   booking=await getBooking(booking.id);if(booking?.status==="refund_pending")await requestRefund(booking);

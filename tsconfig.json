@@ -28,17 +28,21 @@
       ]
     },
     "types": [
-      "node",
-      "@cloudflare/workers-types"
+      "node"
     ]
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "db/**/*.ts",
+    "lib/**/*.ts",
+    "proxy.ts",
+    "next.config.ts",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
@@ -48,6 +52,12 @@
     ".wrangler",
     ".sites-runtime",
     "outputs",
-    "work"
+    "work",
+    "lib/connector*",
+    "scripts",
+    "worker",
+    "vite.config.ts",
+    "cloudflare-env.d.ts",
+    "drizzle.config.ts"
   ]
 }

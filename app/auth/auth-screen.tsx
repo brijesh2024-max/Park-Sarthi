@@ -1,0 +1,21 @@
+import Link from "next/link";
+import { authReady } from "@/lib/auth/config";
+import { getCurrentUser } from "@/lib/auth/server";
+import { authMessage, safeReturnTo } from "@/lib/auth/policy";
+
+export type AuthMode = "sign-in" | "sign-up" | "forgot-password" | "reset-password" | "sign-out";
+export type AuthSearch = Promise<Record<string, string | string[] | undefined>>;
+const titles: Record<AuthMode,string> = { "sign-in":"Welcome back.","sign-up":"Make room for your next stop.","forgot-password":"Reset your password.","reset-password":"Choose a new password.","sign-out":"Ready to sign out?" };
+const subtitles: Record<AuthMode,string> = { "sign-in":"Sign in to manage your parking and host listings.","sign-up":"Create your ParkSarthi account to book or offer a parking space.","forgot-password":"Enter your account email and we’ll send a reset link.","reset-password":"Use a long, unique password for your account.","sign-out":"Your bookings and listings will be saved in your account." };
+const buttons: Record<AuthMode,string> = { "sign-in":"Sign in", "sign-up":"Create account", "forgot-password":"Send reset link", "reset-password":"Save new password", "sign-out":"Sign out" };
+
+export default async function AuthScreen({mode,searchParams}:{mode:AuthMode;searchParams:AuthSearch}) {
+  const params = await searchParams;
+  const returnTo = safeReturnTo(params.return_to);
+  const ready = authReady();
+  const identity = mode === "reset-password" || mode === "sign-out" ? await getCurrentUser() : null;
+  const needsSession = mode === "reset-password" && !identity;
+  const error = authMessage(params.error);
+  const message = authMessage(params.message);
+  return <main className="auth-shell"><Link href="/" className="auth-brand"><img src="/favicon.svg" alt="" width="38" height="38"/>ParkSarthi<span>.</span></Link><section className="auth-panel"><span className="auth-eyebrow">YOUR SPACE IN THE CITY</span><h1>{titles[mode]}</h1><p className="auth-intro">{subtitles[mode]}</p>{!ready?<div className="auth-notice" role="status">Account services are being configured. Registration and sign-in will be available once setup is complete.</div>:needsSession?<div className="auth-notice" role="status">Open the link in your password reset email first. If it expired, <Link href="/auth/forgot-password">request another link</Link>.</div>:<>{error&&<p className="auth-error" role="alert">{error}</p>}{message&&<p className="auth-notice" role="status">{message}</p>}<form action={`/auth/actions/${mode}`} method="post" className="auth-form"><input type="hidden" name="return_to" value={returnTo}/>{mode==="sign-up"&&<label>Your name<input name="full_name" autoComplete="name" minLength={2} maxLength={80} required/></label>}{["sign-in","sign-up","forgot-password"].includes(mode)&&<label>Email address<input type="email" name="email" autoComplete="email" maxLength={254} required/></label>}{["sign-in","sign-up","reset-password"].includes(mode)&&<label>{mode==="reset-password"?"New password":"Password"}<input type="password" name="password" autoComplete={mode==="sign-in"?"current-password":"new-password"} minLength={mode==="sign-in"?1:12} maxLength={128} required/>{mode!=="sign-in"&&<small>Use at least 12 characters.</small>}</label>}{["sign-up","reset-password"].includes(mode)&&<label>Confirm password<input type="password" name="password_confirmation" autoComplete="new-password" minLength={12} maxLength={128} required/></label>}<button className="auth-submit" type="submit">{buttons[mode]}<span aria-hidden="true">↗</span></button></form></>}{mode==="sign-in"&&<><Link className="auth-secondary" href="/auth/forgot-password">Forgot your password?</Link><p className="auth-switch">New to ParkSarthi? <Link href={`/auth/sign-up?return_to=${encodeURIComponent(returnTo)}`}>Create an account</Link></p></>}{mode==="sign-up"&&<p className="auth-switch">Already have an account? <Link href={`/auth/sign-in?return_to=${encodeURIComponent(returnTo)}`}>Sign in</Link></p>}{mode==="forgot-password"&&<p className="auth-switch"><Link href="/auth/sign-in">Back to sign in</Link></p>}{mode==="sign-out"&&<p className="auth-switch"><Link href={returnTo}>Keep me signed in</Link></p>}<p className="auth-footer"><Link href="/">← Back to parking</Link><Link href="/pilot">Booking information</Link></p></section></main>;
+}

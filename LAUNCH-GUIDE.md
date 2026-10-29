@@ -1,16 +1,16 @@
-# ParkSarthi: from private pilot to real bookings
+# ParkSarthi: from deployment to real bookings
 
-Updated 27 October 2026. This release uses ChatGPT sign-in and approved host listings only. Search is empty until hosts submit real spaces and an administrator approves them. `PAYMENT_MODE=disabled` is the default; no simulated bookings can be created. Legacy demo/test bookings are retained in storage but excluded from customer and host dashboards. Keep bookings disabled until the checks below pass.
+Updated 28 October 2026. This release runs on Render with Supabase email/password accounts, PostgreSQL and private photo storage. Complete [RENDER-SETUP.md](./RENDER-SETUP.md) first. Search is empty until hosts submit real spaces and an administrator approves them. `PAYMENT_MODE=disabled` is the default; no simulated bookings can be created. Keep bookings disabled until the checks below pass.
 
 ## What this release covers
 
-The app provides multi-city discovery, car/bike/SUV filters, optional washing, booking and host dashboards, listing review, D1 database records, and R2 photo storage. The payment integration is designed around Razorpay orders, server verification, and webhooks. Code being present does not mean a payment account is activated or a real payment has been tested.
+The app provides real account registration, multi-city discovery, car/bike/SUV filters, optional washing, booking and host dashboards, listing review, PostgreSQL database records, and Supabase photo storage. The payment integration is designed around Razorpay orders, server verification, and webhooks. Code being present does not mean a payment account is activated or a real payment has been tested.
 
 | Area | Owner action or remaining work |
 | --- | --- |
-| Hosting, database, files | The Sites manifest declares the Worker, D1 `DB`, and R2 `BUCKET`. Confirm successful deployment and persistence in the hosted pilot. Local preview data is separate. |
-| Sign-in | Pilot uses ChatGPT sign-in. Decide whether that is suitable for your customers before a public launch; ordinary phone OTP sign-in is not included. |
-| Administration | Set your stable Site user ID in `ADMIN_USER_IDS`. No user becomes an admin automatically. |
+| Hosting, database, files | Apply the PostgreSQL migrations, configure Render, and verify real persistence in Supabase after a redeploy. Old Sites D1/R2 data is not copied automatically. |
+| Sign-in | Email/password registration uses Supabase Auth. Configure confirmation and recovery emails, SMTP and exact redirect origins. Phone OTP sign-in is not included. |
+| Administration | Set your Supabase user UUID in `ADMIN_USER_IDS`. No user becomes an admin automatically. |
 | Driver payment | Supply matching test credentials, verify the complete payment lifecycle, then complete provider activation before live mode. |
 | Host earnings | Automatic linked-account onboarding, split transfers, settlement reconciliation, and payout reporting are not part of this release. A host dashboard amount is not a bank payout. |
 | Host availability | Capacity, daily opening hours, and blocked dates are enforced. Hours and dates are set when creating a listing; editing schedules and recurring weekly calendars require further work. |
@@ -19,18 +19,18 @@ The app provides multi-city discovery, car/bike/SUV filters, optional washing, b
 ## Your first setup steps
 
 1. Check the empty marketplace, submit a space you actually control with your own photograph, and reload to check persistence. Run the automated tests locally; test fixtures must not be uploaded to the live marketplace.
-2. While signed in, open `/api/bootstrap` and find your `user.id`. Configure that exact ID in the hosted `ADMIN_USER_IDS` environment variable, then redeploy. Add further trusted admins only by their own stable IDs. Do not use an email address or a browser-supplied role.
+2. Register and confirm your own account. In Supabase Authentication → Users, or `/api/bootstrap` while signed in, find your user UUID. Configure it in Render's `ADMIN_USER_IDS` environment variable, then redeploy. Add further trusted admins only by their own UUIDs. Do not use an email address, old Sites ID or browser-supplied role.
 3. Review a submitted listing as admin. Test that another account cannot see private bookings, edit another host's space, or access unpublished photos. A listing approval records your review; it is not a physical security guarantee.
 4. Choose the business/operator identity, support email and phone, domain, and initial launch neighbourhoods. The software supports multiple cities; start actual operations only where you can verify and support hosts.
 5. Create your payment-provider account yourself and complete its requested business verification. Do not send passwords, API secrets, bank details, or identity documents in chat. Enter credentials through the provider and hosted secret settings.
 
 ## Connect and test payments
 
-The configuration keys are listed in `.env.example`. Hosted runtime settings are separate from local files and the hosting manifest. A new deployment is required after changing hosted values. Keep `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` server-only; the Checkout key ID is intentionally available to the client.
+The configuration keys are listed in `.env.example`. Render's runtime settings are separate from local `.env.local` files. Redeploy after changing hosted values. Keep `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` server-only; the Checkout key ID is intentionally available to the client.
 
 Customer booking is deliberately live-only: setting `PAYMENT_MODE=test` will not open checkout or create reservations. Provider sandbox lifecycle tests need an isolated staging harness/database before live launch; do not add test records or weaken the gate on the customer site. Confirm automatic capture settings in the provider dashboard. Razorpay requires a server-created order, server-side signature validation using the stored order ID, and payment-status verification. A browser success message alone is insufficient. [Standard Checkout integration](https://razorpay.com/docs/payments/payment-gateway/web-integration/standard/integration-steps/)
 
-Configure `/api/payments/webhook` on the deployed origin in the Razorpay test dashboard, with the same distinct webhook secret as the server. Subscribe to `payment.captured`, `order.paid`, `refund.processed`, and `refund.failed`. The endpoint must be reachable by Razorpay: a private Site's sign-in gate can reject the request before the handler runs. Resolve this through an approved public ingress or an explicitly authorised public launch; do not put a Site access token in a URL or weaken access controls just to bypass the gate.
+Configure `/api/payments/webhook` on the appropriate deployed origin in Razorpay, using the provider environment that matches the credentials and the same distinct webhook secret as the server. Subscribe to `payment.captured`, `order.paid`, `refund.processed`, and `refund.failed`. Render must serve this endpoint directly so Razorpay can deliver events. The handler authenticates events by their signature; do not put user login or a browser challenge in front of it. Test staging webhook delivery separately before activating the live provider endpoint.
 
 Verify webhook signatures over the raw request body, duplicate-event handling, and out-of-order delivery. Use a staging endpoint reachable from the provider and inspect actual delivery results. [Razorpay webhook validation and testing](https://razorpay.com/docs/webhooks/validate-test/)
 
@@ -62,7 +62,7 @@ Prepare a privacy notice covering account data, vehicle registration, booking hi
 
 ## Operational launch gate
 
-Live payments require both `PAYMENT_MODE=live` and `LIVE_PAYMENTS_ENABLED=true`, plus a complete matching credential set. Before enabling them or changing the audience to public, confirm:
+Live payments require both `PAYMENT_MODE=live` and `LIVE_PAYMENTS_ENABLED=true`, plus a complete matching credential set. Before enabling real charges, confirm:
 
 - A payment provider has approved the business and host settlement model; payments, refunds, and external webhooks pass staging tests.
 - Real host listings have been reviewed, support contacts are staffed, and drivers can report access problems or damage.
@@ -71,4 +71,4 @@ Live payments require both `PAYMENT_MODE=live` and `LIVE_PAYMENTS_ENABLED=true`,
 - Database recovery/export options and photo backups are confirmed for the hosting account, with a tested restore process and retention policy. Source code versioning is not a database backup.
 - Alerts cover application failures, payment/webhook failures, unresolved refunds and settlement discrepancies. Assign an operator to reconcile them daily during the pilot.
 
-Public launch, a custom domain, and live credentials are explicit later steps. The private site can collect and review genuine host listings while booking remains disabled.
+The Render site can collect registrations and genuine host listings while booking remains disabled. A working public URL is not a completed payments, host-payout or operations launch. A custom domain must be added to both Render and Supabase auth configuration. Treat any old Sites-to-Supabase record migration as a separate checked transfer of data and account ownership.

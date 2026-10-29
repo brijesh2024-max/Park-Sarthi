@@ -1,106 +1,62 @@
 # ParkSarthi
 
-A parking marketplace pilot for Indian cities. Hosts offer spare parking space and optional vehicle washing; drivers search, review a quote, and book. The deployment is private and shows only approved host listings. There is no sample catalogue or simulated checkout. Customer booking stays disabled until live payments are configured; automatic host payouts are not implemented.
+ParkSarthi connects drivers with hosts offering spare parking space and optional vehicle washing across Indian cities. Search shows approved host listings only. It stays empty until real spaces are submitted and reviewed; there is no sample catalogue or simulated checkout.
 
 ## Stack
 
-React and TypeScript on Vinext, Cloudflare Workers, D1 with Drizzle schema/migrations, and R2 for listing photos. Hosted identity comes from Sites' ChatGPT sign-in. Razorpay integration code handles orders, payment verification, and payment/refund webhooks when explicitly configured.
+Next.js and React with TypeScript, deployed as a Node.js web service on Render. Supabase provides PostgreSQL, verified email/password accounts and private photo storage. Razorpay order, verification and refund code is present, but customer booking remains disabled until live payment setup and operating arrangements are complete. Automatic host payouts are not implemented.
 
-## Features and limits
+Start with [RENDER-SETUP.md](./RENDER-SETUP.md) for the provider accounts, migrations, secrets, login emails and deployment steps. [LAUNCH-GUIDE.md](./LAUNCH-GUIDE.md) covers real parking operations and payment launch. [GITHUB-GUIDE.md](./GITHUB-GUIDE.md) covers pushing updates to your repository.
 
-- Multi-city discovery, vehicle and amenity filters, car-wash add-ons, and transparent INR quotes.
-- Persistent driver bookings, a host listing dashboard, image uploads, and admin listing review.
-- Server-side prices and authorization, booking capacity checks, payment holds, and a live-payment readiness gate.
-- Payment integration scaffolding needs merchant activation, credentials, and end-to-end provider testing before real use.
-- Hosts set daily opening hours and blocked dates at listing creation; schedule editing and weekly recurring calendars are not included yet.
-- Automatic host payouts, linked-account onboarding, SMS/phone OTP, and staffed customer support are not included.
-- A listed amenity or admin approval is not a physical inspection, insurance policy, or security guarantee.
+## What is included
 
-See [LAUNCH-GUIDE.md](./LAUNCH-GUIDE.md) for the owner setup and public-launch requirements, including the private-site webhook restriction and approved host settlement flow.
+- Email/password registration, email confirmation, sign-in, sign-out and password recovery through Supabase Auth.
+- Host photos, listing submission, administrator approval, pause controls, daily opening hours and blocked dates.
+- City, vehicle and amenity filters, optional car washing, and transparent INR quotes with a 10% service fee.
+- Server-side authorization and pricing, temporary payment holds, booking-capacity checks, payment verification and refund reconciliation.
+- Driver and host dashboards showing actual live-payment records; host bookings refresh while the page is open.
+- Private object storage with authorization through `/api/photos/...`; user-uploaded photos are not made into unrestricted public bucket URLs.
 
-## Run locally
+Automatic host onboarding/payouts, customer ratings/reviews, visitor analytics, phone OTP, schedule editing and staffed support remain unfinished. Approval of a listing does not guarantee physical security, insurance or protection against parking fines.
 
-Use Node.js 22.13 or newer. Start in this directory. The project uses the portable profile on Windows, macOS, and ordinary Linux.
+## Local development
 
-```sh
-npm run install:ci
-npm run build
-```
+Use the Node version in `.node-version`. Install dependencies with `npm ci --include=dev`. Copy `.env.example` to ignored `.env.local` and configure a separate Supabase development project. Keep `PAYMENT_MODE=disabled` and `LIVE_PAYMENTS_ENABLED=false`.
 
-The first build creates `dist/server/wrangler.json`, which local D1 commands need. Apply the committed SQL migrations in `drizzle/` in filename order, **once per fresh local database**. For each pending file, replace `<migration-file>` below with its exact filename:
-
-```sh
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/<migration-file>.sql
-```
-
-Then start the development server:
+Apply the PostgreSQL migrations in `postgres/` in filename order, either in the Supabase SQL Editor or with `npm run db:migrate`. The migration command requires the database connection settings. Do not run the historical `drizzle/` SQLite migrations against PostgreSQL.
 
 ```sh
 npm run dev
 ```
 
-Open the printed local URL, normally `http://127.0.0.1:5173`. The portable preview simulates sign-in only on loopback; its Sign in link signs in as a local test identity. This development mechanism is excluded from hosted production. Use `npm start` to preview the built Worker locally; that mode does not simulate sign-in.
+The local app runs at `http://127.0.0.1:5173`. Sign-in uses actual Supabase accounts; there is no automatic development identity. Set `APP_URL` and the Supabase auth redirect URLs for this local origin as described in the setup guide.
 
-Local D1/R2 state lives under ignored `.wrangler/` and is separate from hosted data. Do not assume a local test record exists after deployment.
-
-## Configuration
-
-The checked-in [.env.example](./.env.example) contains names and safe defaults only:
-
-| Variable | Purpose |
-| --- | --- |
-| `PAYMENT_MODE` | `disabled` by default. Customer reservations require `live`, matching keys, and the live interlock. `test` never enables customer bookings. |
-| `LIVE_PAYMENTS_ENABLED` | Additional explicit live-mode interlock; leave `false` for the pilot. |
-| `ADMIN_USER_IDS` | Comma-separated stable Site user IDs allowed to review listings. Empty means no app admins. |
-| `RAZORPAY_KEY_ID` | Public Checkout key ID from the matching provider environment. |
-| `RAZORPAY_KEY_SECRET` | Server-only provider API secret. |
-| `RAZORPAY_WEBHOOK_SECRET` | Server-only webhook signing secret. |
-
-Use an ignored `.dev.vars` file for local Worker values when needed. Put hosted values in Sites runtime environment settings, then redeploy. Never put secrets in client code, source control, the hosting manifest, or chat. The manifest's `DB` and `BUCKET` are logical resource bindings, not credentials.
-
-## Database changes
-
-Edit `db/schema.ts`, then generate and inspect a new migration:
+## Verification
 
 ```sh
-npm run db:generate
+npm run typecheck
+npm test
 npm run build
 ```
 
-Apply only newly pending migrations to local D1 with the command above. Commit SQL and Drizzle metadata together. Do not rewrite a migration after it has been applied. The hosted publishing workflow applies hosted migrations separately; it does not copy local data.
+Automated tests use isolated fixtures and database tests; they do not establish that your hosted provider credentials, email delivery, live charges or bank payouts work. Check the actual deployment after configuring its accounts. A Render build can succeed without establishing a usable application database; `/api/health` verifies runtime readiness.
 
-## Verify
+## Configuration
 
-Run the backend unit, signature, scheduling, and concurrent database tests:
+`.env.example` lists the supported environment names and safe defaults. `APP_URL` must be the canonical HTTPS website origin in production. `DATABASE_URL` uses Supabase's session pooler with verified TLS; `DATABASE_SSL_CA` supplies the optional Supabase CA PEM. `SUPABASE_SERVICE_ROLE_KEY`, database passwords and Razorpay secrets are server-only. Never commit local env files or put a service key in a `NEXT_PUBLIC_` variable.
 
-```sh
-node --test tests/backend.test.mjs
-```
-
-With the migrated local development server running with bookings disabled and without an admin allowlist:
-
-```sh
-node tests/runtime-smoke.mjs
-```
-
-The smoke test writes a disposable photo and draft listing to the loopback database. It checks authentication, absence of sample inventory and simulation history, rejected sample-booking requests, cross-origin write rejection, admin restrictions, forged payment rejection, image upload, photo privacy, and listing review/pause behavior. Unit/database tests cover pricing and payment/capacity transitions. It refuses non-loopback targets. To select a different local port, set `SMOKE_ORIGIN` to that local origin before running it.
-
-Compile the production artifact with `npm run build`. These checks do not exercise a real Razorpay transaction, bank refund, external webhook delivery, host settlement, or physical parking access. Follow the launch guide for those tests.
+`ADMIN_USER_IDS` contains Supabase user UUIDs, not emails or old Sites IDs. All successful registrations are visible in Supabase Authentication → Users. The app's own data lives in the `parksarthi` schema and private photos in the `parking-photos` bucket.
 
 ## Project map
 
-| Location | Contents |
+| Location | Purpose |
 | --- | --- |
-| `app/marketplace.tsx`, `app/globals.css` | Marketplace UI and responsive styling. |
-| `app/api/` | Account, listing, booking, upload, admin, and payment endpoints. |
-| `app/chatgpt-auth.ts` | Hosted identity helpers. |
-| `lib/marketplace.ts` | Shared types, validation, and pricing. Test-only fixtures live under `tests/`. |
-| `lib/server/` | Database, authorization, and provider operations. |
-| `db/`, `drizzle/` | Schema declarations and versioned SQL migrations. |
-| `tests/` | Local verification scripts. |
-| `.openai/hosting.json` | Site identity and D1/R2 binding declarations. |
-| `worker/`, `scripts/` | Worker entry point and maintained build/runtime integration. |
+| `app/marketplace.tsx`, `app/globals.css` | Marketplace UI and responsive styles |
+| `app/auth/`, `lib/auth/`, `proxy.ts` | Supabase accounts, session validation and auth forms |
+| `app/api/`, `lib/server/` | Listings, bookings, uploads, administration and payment operations |
+| `db/`, `postgres/` | PostgreSQL adapter and versioned schema migrations |
+| `lib/marketplace.ts`, `lib/payment-config.ts` | Validation, prices and booking-readiness gate |
+| `tests/` | Isolated automated verification |
+| `render.yaml` | Render service configuration |
 
-## Deployment
-
-Use the Sites publishing workflow for the existing project ID in `.openai/hosting.json`; do not create a second Site for an update. It synchronizes source, builds/packages the Worker, applies migrations, and deploys a saved version. Keep the private audience and disabled bookings until the owner approves the later public launch and the launch guide's requirements are complete.
+The earlier Sites deployment, D1/R2 storage and ChatGPT account IDs are separate. This release does not copy them automatically. Any genuine existing records need an explicit data and identity migration before traffic is switched.
