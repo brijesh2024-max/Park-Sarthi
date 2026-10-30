@@ -11,6 +11,7 @@
     "start": "node scripts/start-node.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:smoke": "node tests/runtime-smoke.mjs",
+    "test:auth": "node tests/auth-flows.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate-postgres.mjs",
     "lint": "eslint app lib db tests --ignore-pattern \"lib/connector*\""

@@ -16,6 +16,6 @@ export async function GET(request: Request) {
     const { error } = await client.auth.exchangeCodeForSession(code);
     if (error) return authError(request, "sign-in", "expired");
     const next = params.get("next");
-    return authRedirect(request, next === "/auth/reset-password" ? next : safeReturnTo(next));
+    return authRedirect(request, next === "/auth/reset-password" ? next : `/auth/complete-profile?return_to=${encodeURIComponent(safeReturnTo(next))}`);
   } catch { return authError(request, "sign-in", "provider"); }
 }

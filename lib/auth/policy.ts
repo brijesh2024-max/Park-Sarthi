@@ -21,11 +21,22 @@ export function validEmailCode(value: unknown): value is string {
   return typeof value === "string" && /^[0-9]{6,10}$/.test(value);
 }
 
+export function profileDetails(name: unknown, phone: unknown) {
+  if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 80 || /[\u0000-\u001f\u007f]/.test(name)) return null;
+  if (typeof phone !== "string") return null;
+  const contact = phone.trim().replace(/[ ()-]/g, "");
+  if (!/^\+?[0-9]{7,15}$/.test(contact)) return null;
+  return {full_name:name.trim(), contact_phone:contact};
+}
+
 export function allowedAuthOrigin(origin: string | null, expectedOrigin: string, fetchSite: string | null): boolean {
   return origin === expectedOrigin && fetchSite !== "cross-site";
 }
 
 export const AUTH_MESSAGES: Record<string, string> = {
+  profile: "Enter your full name and a valid mobile number.",
+  signup_sent: "Check your email for the registration code. Verify it to finish signing up. If you already registered, use the sign-in page.",
+  confirmation_setup: "Registration verification needs attention. Please contact support or try again later.",
   code: "That code is incorrect or expired. Try again or request a new code.",
   sent: "Check your inbox and spam folder for your sign-in code. Use the most recent code.",
   google: "Google sign-in could not start. Please try again or use an email code.",

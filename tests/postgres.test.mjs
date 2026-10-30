@@ -134,6 +134,17 @@ test('Supabase migration stores real signup profiles and keeps photos private',a
  assert.equal(permissions.profile,false);assert.equal(permissions.marketplace,false);
 });
 
+test('contact profile migration preserves users, syncs private fields and is repeatable',async()=>{
+ const sql=readFileSync(new URL('../postgres/0003_profile_details.sql',import.meta.url),'utf8');
+ await memory.exec(sql);await memory.exec(sql);
+ const id='c0e294ef-a544-44d3-a26e-6be594ca29de';
+ assert.equal((await memory.query('SELECT full_name FROM public.profiles WHERE user_id=$1',[id])).rows[0].full_name,'Example test user');
+ await memory.query('UPDATE auth.users SET raw_user_meta_data=$2::jsonb WHERE id=$1',[id,JSON.stringify({full_name:'Updated user',contact_phone:'+919876543210',role:'admin'})]);
+ const p=(await memory.query('SELECT * FROM public.profiles WHERE user_id=$1',[id])).rows[0];
+ assert.equal(p.contact_phone,'+919876543210');assert.equal(p.role,undefined);
+ assert.equal((await memory.query("SELECT has_table_privilege('authenticated','public.profiles','SELECT') AS permitted")).rows[0].permitted,false);
+});
+
 // PGlite executes the real PostgreSQL statements but has a single database session.
 // Cross-connection isolation is verified only with an explicitly supplied disposable DB.
 test('independent PostgreSQL connections cannot oversell one shared listing', {skip:!process.env.TEST_DATABASE_URL}, async()=>{

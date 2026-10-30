@@ -4,7 +4,7 @@ Updated 28 October 2026 for the Render/Supabase migration.
 
 - Next.js runs as a Node.js web service. PostgreSQL, authentication and private photo storage are provided by Supabase.
 - Authentication verifies a real Supabase session. Arbitrary ChatGPT identity headers cannot authenticate a user.
-- Email/password signup creates real auth users; confirmation, recovery and sign-out use the app's auth routes. Administrator IDs are Supabase user UUIDs.
+- Email registration collects name, email, password and mobile number and requires an email OTP. Existing accounts support password, Google and email OTP login. Google uses its verified email followed by profile completion. Mobile is contact information, not an SMS-verified identity. Administrator IDs are Supabase user UUIDs.
 - Search returns approved database listings only. Empty means empty; no synthetic inventory, reviews or transaction history may be appended.
 - Customer booking requires live Razorpay keys, a webhook secret, PAYMENT_MODE=live and LIVE_PAYMENTS_ENABLED=true. Disabled or test mode never creates a customer reservation.
 - Server-calculated prices, temporary holds, captured-payment verification, transaction-protected capacity checks and refund reconciliation remain mandatory.

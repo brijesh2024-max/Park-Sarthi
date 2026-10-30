@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { allowedAuthOrigin, authMessage, safeReturnTo, validEmail, validPassword } from '../lib/auth/policy.ts';
+import {profileDetails} from '../lib/auth/policy.ts';
+
+test('registration profile validation bounds personal data and normalizes contact numbers',()=>{
+  assert.deepEqual(profileDetails(' Test User ','+91 98765-43210'),{full_name:'Test User',contact_phone:'+919876543210'});
+  for(const fields of [['A','9876543210'],['Test\nUser','9876543210'],['Test User','abc'],['Test User','123'],['Test User',''],['Test User',{}]]) assert.equal(profileDetails(...fields),null);
+});
 
 test('auth returns only to same-origin non-auth pages', () => {
   for (const value of [undefined, null, 1, '', 'https://evil.example', '//evil.example', '/\\evil.example', '/\nevil.example', '/auth/sign-out', '/a/../auth/callback?code=secret']) assert.equal(safeReturnTo(value), '/');

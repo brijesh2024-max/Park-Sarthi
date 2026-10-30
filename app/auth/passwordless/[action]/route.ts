@@ -1,18 +1,17 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { appOrigin, authReady, authCookieOptions } from "@/lib/auth/config";
+import { appOrigin, authReady } from "@/lib/auth/config";
 import { createAuthClient } from "@/lib/auth/server";
 import { allowedAuthOrigin, safeReturnTo, validEmail, validEmailCode } from "@/lib/auth/policy";
 import { authError, authRedirect } from "@/lib/auth/responses";
+import { pendingEmail, setPendingEmail, clearPendingEmail } from "@/lib/auth/pending";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const PENDING_EMAIL = "parksarthi-otp-email";
 const reject = (message: string, status: number) => new NextResponse(message, {status, headers:{"Cache-Control":"private, no-store"}});
 
 export async function POST(request: Request, {params}: {params: Promise<{action:string}>}) {
   const {action} = await params;
-  if (!["google", "send", "verify"].includes(action)) return reject("Not found.",404);
+  if (!["google", "send", "verify", "resend"].includes(action)) return reject("Not found.",404);
   const origin = appOrigin(new URL(request.url).origin);
   if (!origin || !authReady()) return reject("Account services are being configured. Please try again later.",503);
   if (!allowedAuthOrigin(request.headers.get("origin"),origin,request.headers.get("sec-fetch-site"))) return reject("This request must come from ParkSarthi.",403);
@@ -31,8 +30,7 @@ export async function POST(request: Request, {params}: {params: Promise<{action:
   }
   const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
   const next = safeReturnTo(form.get("return_to"));
-  const page = action === "verify" ? "verify-code" : "sign-in";
-  const jar = await cookies();
+  const page = action === "verify" || action === "resend" ? "verify-code" : "sign-in";
   const fail = (code:string) => authError(request,page,code,next);
   try {
     const client = await createAuthClient();
@@ -48,20 +46,26 @@ export async function POST(request: Request, {params}: {params: Promise<{action:
     if (action === "send") {
       const email = validEmail(form.get("email"));
       if (!email) return fail("invalid");
-      const {error} = await client.auth.signInWithOtp({email,options:{shouldCreateUser:true}});
+      const {error} = await client.auth.signInWithOtp({email,options:{shouldCreateUser:false}});
       if (error) return fail(error.status === 429 ? "rate" : "provider");
       // This cookie selects the email only. Supabase must verify its OTP before
       // any session exists; cookie contents never establish an identity.
-      jar.set(PENDING_EMAIL,email,{...authCookieOptions(),maxAge:3600});
+      await setPendingEmail(email,"email");
       return authRedirect(request,`/auth/verify-code?message=sent&return_to=${encodeURIComponent(next)}`);
     }
-    const email = validEmail(jar.get(PENDING_EMAIL)?.value);
+    const {email,kind} = await pendingEmail();
     const token = form.get("code")?.trim();
     if (!email) return authError(request,"sign-in","expired",next);
+    if (action === "resend") {
+      const {error}=kind==="signup" ? await client.auth.resend({type:"signup",email}) : await client.auth.signInWithOtp({email,options:{shouldCreateUser:false}});
+      if(error) return fail(error.status===429?"rate":"provider");
+      await setPendingEmail(email,kind);
+      return authRedirect(request,`/auth/verify-code?message=${kind==="signup"?"signup_sent":"sent"}&return_to=${encodeURIComponent(next)}`);
+    }
     if (!validEmailCode(token)) return fail("code");
-    const {data,error} = await client.auth.verifyOtp({email,token,type:"email"});
+    const {data,error} = await client.auth.verifyOtp({email,token,type:kind});
     if (error || !data.session || !data.user) return fail(error?.status === 429 ? "rate" : "code");
-    jar.set(PENDING_EMAIL,"",{...authCookieOptions(),maxAge:0});
-    return authRedirect(request,next);
+    await clearPendingEmail();
+    return authRedirect(request,`/auth/complete-profile?return_to=${encodeURIComponent(next)}`);
   } catch { return fail("provider"); }
 }

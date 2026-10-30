@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { appOrigin, authReady } from "@/lib/auth/config";
-import { createAuthClient } from "@/lib/auth/server";
-import { allowedAuthOrigin, safeReturnTo, validEmail, validPassword } from "@/lib/auth/policy";
+import { createAuthClient, createRegistrationClient } from "@/lib/auth/server";
+import { allowedAuthOrigin, profileDetails, safeReturnTo, validEmail, validPassword } from "@/lib/auth/policy";
+import { setPendingEmail } from "@/lib/auth/pending";
 import { authError, authRedirect } from "@/lib/auth/responses";
 
 export const runtime = "nodejs";
@@ -44,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
   try { form = await readForm(request); }
   catch { return rejected("Invalid or oversized form.", 400); }
   const returnTo = safeReturnTo(form.get("return_to"));
-  const client = await createAuthClient();
+  const client = action === "sign-up" ? createRegistrationClient() : await createAuthClient();
   if (!client) return authError(request, action, "unavailable", returnTo);
   const problem = (error: { status?: number } | null, fallback = "provider") => authError(request, action, error?.status === 429 ? "rate" : fallback, returnTo);
   try {
@@ -73,19 +74,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     const password = form.get("password");
     if (action === "sign-in") {
       if (typeof password !== "string" || password.length < 1 || password.length > 128) return authError(request, action, "credentials", returnTo);
-      const { error } = await client.auth.signInWithPassword({ email, password });
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
       if (error) return problem(error, "credentials");
-      return authRedirect(request, returnTo);
+      if (!data.user?.email_confirmed_at) { await client.auth.signOut({scope:"local"}); return authError(request,action,"credentials",returnTo); }
+      return authRedirect(request, `/auth/complete-profile?return_to=${encodeURIComponent(returnTo)}`);
     }
     if (!validPassword(password) || password !== form.get("password_confirmation")) return authError(request, action, "password", returnTo);
-    const name = (form.get("full_name") || "").trim();
-    if (name.length < 2 || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) return authError(request, action, "name", returnTo);
-    const { data, error } = await client.auth.signUp({ email, password, options: { data: { full_name: name }, emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(returnTo)}` } });
+    const profile = profileDetails(form.get("full_name"),form.get("phone"));
+    if (!profile) return authError(request, action, "profile", returnTo);
+    const { data, error } = await client.auth.signUp({ email, password, options: { data: {...profile,parksarthi_profile_complete:true}, emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(returnTo)}` } });
     if (error) return problem(error);
-    // Supabase normally requires email confirmation. A project that disables
-    // that option can return an already authenticated session instead.
-    if (data.session) return authRedirect(request, returnTo);
-    return authRedirect(request, "/auth/sign-in?message=confirmation");
+    // Require Confirm email in Supabase. Never accept an automatic signup session.
+    if (data.session) { await client.auth.signOut({scope:"local"}); return authError(request,action,"confirmation_setup",returnTo); }
+    await setPendingEmail(email,"signup");
+    return authRedirect(request, `/auth/verify-code?message=signup_sent&return_to=${encodeURIComponent(returnTo)}`);
   } catch {
     // Do not echo provider error text, request bodies, emails or session tokens.
     return authError(request, action, "provider", returnTo);
